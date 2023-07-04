@@ -5345,6 +5345,89 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_AveragePool)
     return importAveragePool(ctx, node, inputs);
 }
 
+//add padding2d op
+DEFINE_BUILTIN_OP_IMPORTER(Plugin)
+{
+    std::vector<nvinfer1::ITensor*> inputTensors;
+    std::vector<onnx2trt::ShapedWeights> weights;
+    for(int i = 0; i < inputs.size(); ++i){
+        auto& item = inputs.at(i);
+        if(item.is_tensor()){
+            nvinfer1::ITensor* input = &convertToTensor(item, ctx);
+            inputTensors.push_back(input);
+        }else{
+            weights.push_back(item.weights());
+        }
+    }
+
+    float value = 0.0f;
+    OnnxAttrs attrs( node, ctx);
+    auto name = attrs.get<std::string>("name", "");
+    auto info = attrs.get<std::string>("info", "");
+
+    if(name.compare("Mpadding")==0)
+    {
+        std::string pad_str = onnx2trt::get_value_from_json(info, "padding", "0,0,0,0");
+        onnx2trt::string_trim_super(pad_str, "(");
+        onnx2trt::string_trim_super(pad_str, ")");
+
+        std::vector<std::string> vals;
+        onnx2trt::string_split(vals, pad_str, ",");
+
+        std::vector<int64_t> onnxPadding(4); // top, left, bottom, right
+
+        onnxPadding[0] = atoi(vals[2].c_str());
+        onnxPadding[1] = atoi(vals[0].c_str());
+        onnxPadding[2] = atoi(vals[3].c_str());
+        onnxPadding[3] = atoi(vals[1].c_str());
+
+        nvinfer1::Dims dims_pad;
+        dims_pad.nbDims = 1;
+        dims_pad.d[0]=4;
+        std::fill_n(dims_pad.d + 1, 7, 0);
+        ShapedWeights pads_weights(::ONNX_NAMESPACE::TensorProto_DataType_INT64, onnxPadding.data(), dims_pad);
+        inputs.push_back(pads_weights);
+
+        nvinfer1::Dims dims_val;
+        dims_val.nbDims =1;
+        dims_val.d[0]=1;
+        std::fill_n(dims_val.d + 1, 7, 0);
+        std::vector<float> val_tmp(1, 0.0f);
+        ShapedWeights val_weights (::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, val_tmp.data(), dims_val);
+        inputs.push_back(val_weights);
+
+        return importPad(ctx, node, inputs);
+    }
+    else if(name.compare("Mresize")==0 )
+    {
+        std::string value_str = onnx2trt::get_value_from_json(info, "scale_factor", "0,0,0,0");
+        onnx2trt::string_trim_super(value_str, "(");
+        onnx2trt::string_trim_super(value_str, ")");
+
+        std::vector<std::string> vals;
+        onnx2trt::string_split(vals, value_str, ",");
+
+        std::vector<float> scales(4 , 1.0f);
+        scales[2] = atof(vals[0].c_str());
+        scales[3] = atof(vals[0].c_str());
+
+        ShapedWeights  empty_weights;
+        inputs.push_back(empty_weights);
+
+        nvinfer1::Dims dims_pad;
+        dims_pad.nbDims = 1;
+        dims_pad.d[0] = 4;
+        std::fill_n(dims_pad.d + 1, 7, 0);
+        ShapedWeights pads_weights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, scales.data(), dims_pad);
+        inputs.push_back(pads_weights);
+
+        return importResize(ctx, node, inputs);
+
+    }
+
+
+}
+
 } // namespace
 
 } // namespace onnx2trt
